@@ -13,7 +13,7 @@
 } while (0);
 
 #define MAC_STR_LEN      17 /* e.g. DE:AD:BE:EF:00:00 (2 * ETH_ALEN + 5) */
-#define MAC_BUFF_LEN     (MAC_STR_LEN + 1)
+#define MAC_STR_BUFF_LEN (MAC_STR_LEN + 1)
 #define MAC_OCTET_COUNT  ETH_ALEN
 #define ADDR_STR_MAX_LEN 15 /* IPv4 */
 #define ADDR_BUFF_LEN    (ADDR_STR_MAX_LEN + 1)

@@ -45,10 +45,10 @@ enum {
 
 static bool online(const char* addr);
 static void send_payload(char MAC[MAC_STR_LEN]);
-static void mk_payload(char MAC_str[MAC_BUFF_LEN],
+static void mk_payload(char MAC_str[MAC_STR_BUFF_LEN],
                        uint8_t payload[PAYLOAD_LEN]);
-static bool lookup_MAC(const char* addr, char MAC[MAC_BUFF_LEN]);
-static bool arp_cache_lookup_MAC(const char* addr, char MAC[MAC_BUFF_LEN]);
+static bool lookup_MAC(const char* addr, char MAC[MAC_STR_BUFF_LEN]);
+static bool arp_cache_lookup_MAC(const char* addr, char MAC[MAC_STR_BUFF_LEN]);
 static bool wake(const ClientEntry* client);
 static bool await_response(const char* addr);
 static error_t parse_opt(int key, char* arg, struct argp_state* state);
@@ -65,8 +65,8 @@ static void update_cache(void);
 const char* argp_program_version = "wol 1.0";
 const char* error_print_prog_name = "wol";
 
-static char doc[] = "QWFX todo."; // QWFX todo
-static char args_doc[] = "[ADDRESS [MAC]]";
+static char doc[] = "Wake Machines on LAN";
+static char args_doc[] = "[ADDRESS [MAC]]...";
 static struct argp_option opts[] = {
     {"clear-cache", 'c', 0,         0, "Clear cache",                        0},
     {"previous",    'p', 0,         0, "Wake most recently woken client",    0},
@@ -269,12 +269,12 @@ static void add_clients(size_t len, ClientEntry cls[len]) {
     for (size_t i = 0; i < len; i++) {
         if (strlen(cls[i].MAC) == 0) {
             ClientEntry cached;
-            char MAC[MAC_BUFF_LEN];
+            char MAC[MAC_STR_BUFF_LEN];
 
             if (cache_get(cls[i].addr, &cached)) {
-                strcpy(clients[i].MAC, cached.MAC);
+                strcpy(cls[i].MAC, cached.MAC);
             } else if (lookup_MAC(cls[i].addr, MAC)) {
-                strcpy(clients[i].MAC, MAC);
+                strcpy(cls[i].MAC, MAC);
             } else {
                 print_info("Could not resolve MAC for: %s\n", cls[i].addr);
                 continue;
@@ -328,9 +328,9 @@ static bool await_response(const char* addr) {
     return online(addr);
 }
 
-static bool lookup_MAC(const char* addr, char MAC[MAC_BUFF_LEN]) {
+static bool lookup_MAC(const char* addr, char MAC[MAC_STR_BUFF_LEN]) {
     size_t cmd_len = snprintf(NULL, 0, PING_CMD, addr) + 1;
-    char ping_cmd[cmd_len + 1];
+    char ping_cmd[cmd_len + 1]; // QWFX is this the right len?
     snprintf(ping_cmd, cmd_len, PING_CMD, addr);
 
     system(ping_cmd); // Try populate ARP cache
@@ -338,7 +338,7 @@ static bool lookup_MAC(const char* addr, char MAC[MAC_BUFF_LEN]) {
     return arp_cache_lookup_MAC(addr, MAC);
 }
 
-static bool arp_cache_lookup_MAC(const char* addr, char MAC[MAC_BUFF_LEN]) {
+static bool arp_cache_lookup_MAC(const char* addr, char MAC[MAC_STR_BUFF_LEN]) {
     FILE* arp_fp = fopen(ARP_CACHE_PATH, "r");
 
     if (arp_fp == NULL || ferror(arp_fp)) {
@@ -348,12 +348,12 @@ static bool arp_cache_lookup_MAC(const char* addr, char MAC[MAC_BUFF_LEN]) {
     fscanf(arp_fp, "%*[^\n]\n"); // Skip header
 
     char ln_addr[ADDR_BUFF_LEN];
-    char ln_MAC[MAC_BUFF_LEN];
+    char ln_MAC[MAC_STR_BUFF_LEN];
     bool found_addr = false;
 
     while (fscanf(arp_fp, ARP_LINE_FMT, ln_addr, ln_MAC) != EOF) {
         if (strcmp(ln_addr, addr) == 0 && strcmp(ln_MAC, ZEROED_MAC) != 0) {
-            strncpy(MAC, ln_MAC, sizeof ln_MAC);
+            strncpy(MAC, ln_MAC, MAC_STR_BUFF_LEN);
             found_addr = true;
 
             break;
@@ -365,7 +365,7 @@ static bool arp_cache_lookup_MAC(const char* addr, char MAC[MAC_BUFF_LEN]) {
     return found_addr;
 }
 
-static void mk_payload(char MAC_str[MAC_BUFF_LEN],
+static void mk_payload(char MAC_str[MAC_STR_BUFF_LEN],
                        uint8_t payload[PAYLOAD_LEN]) {
     uint8_t MAC[MAC_OCTET_COUNT];
     assert(parse_MAC(MAC_str, MAC));
@@ -438,4 +438,3 @@ static bool online(const char* addr) {
 
     return true;
 }
-

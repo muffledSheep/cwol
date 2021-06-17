@@ -8,8 +8,8 @@
 typedef struct ClientEntry ClientEntry;
 
 struct ClientEntry {
-    char addr[ADDR_STR_MAX_LEN + 1];
-    char MAC[MAC_STR_LEN + 1];
+    char addr[ADDR_BUFF_LEN];
+    char MAC[MAC_STR_BUFF_LEN];
 };
 
 int cache_init(void);

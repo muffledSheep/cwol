@@ -300,10 +300,8 @@ static void init_data_dir(void) {
 
     if (dir) {
         closedir(dir);
-    } else {
-        if (mkdir(dir_name, S_IRWXU) == -1) {
-            DIE("Failed to create data directory in: '%s'\n", dir_name);
-        }
+    } else if (mkdir(dir_name, S_IRWXU) == -1) {
+        DIE("Failed to create data directory in: '%s'\n", dir_name);
     }
 
     dat_dir_name(sizeof cache_fname, cache_fname, CACHE_FILE);
@@ -333,7 +331,6 @@ static int next_line(FILE* fp, ClientEntry* entry) {
 
     return valid_addr(entry->addr) && valid_MAC(entry->MAC) ? 1 : -1;
 }
-
 
 static void lock(struct flock* fl, FILE* fp) {
     fl->l_type = F_WRLCK;
