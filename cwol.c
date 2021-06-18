@@ -84,11 +84,13 @@ static unsigned rsp_poll_interval_secs = 1;
 static unsigned num_threads = -1;
 static bool wake_prev = false;
 static bool clear_cache = false;
-static ClientEntry* clients = NULL;
-static bool* successfully_woken = NULL;
 static size_t clients_len = 0;
 static size_t clients_idx = 0;
 static pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+    ClientEntry entry;
+    bool successfuly_woken;
+} *clients;
 
 int main(int argc, char** argv) {
     cache_init();
@@ -97,11 +99,6 @@ int main(int argc, char** argv) {
 
     struct argp argp = {opts, parse_opt, args_doc, doc, 0, 0, 0};
     argp_parse(&argp, argc, argv, 0, 0, NULL);
-
-    if ((successfully_woken =
-         calloc(clients_len, sizeof *successfully_woken)) == NULL) {
-        DIE("Memory error.\n");
-    }
 
     if (clear_cache) {
         cache_clear();
@@ -128,16 +125,11 @@ static void cleanup(void) {
         free(clients);
         clients = NULL;
     }
-
-    if (successfully_woken) {
-        free(successfully_woken);
-        successfully_woken = NULL;
-    }
 }
 
 static void set_last_woken(void) {
     if (!wake_prev && clients_len) {
-        cache_set_last_woken(clients[clients_len - 1].addr);
+        cache_set_last_woken(clients[clients_len - 1].entry.addr);
     }
 }
 
@@ -180,12 +172,12 @@ static void* wake_worker(void* _) {
         }
 
         size_t entry_idx = clients_idx++;
-        ClientEntry* entry = &clients[entry_idx];
+        ClientEntry* entry = &clients[entry_idx].entry;
 
         PTHREAD_CHECK(pthread_mutex_unlock(&clients_mutex));
 
         if (wake(entry)) {
-            successfully_woken[entry_idx] = true;
+            clients[entry_idx].successfuly_woken = true;
         }
     }
 
@@ -230,8 +222,8 @@ static error_t parse_opt(int key, char* arg, struct argp_state* state) {
 
 static void update_cache(void) {
     for (size_t i = 0; i < clients_len; i++) {
-        if (successfully_woken[i]) {
-            cache_update(clients[i].addr, clients[i].MAC);
+        if (clients[i].successfuly_woken) {
+            cache_update(clients[i].entry.addr, clients[i].entry.MAC);
         }
     }
 }
@@ -281,7 +273,7 @@ static void add_clients(size_t len, ClientEntry cls[len]) {
             }
         }
 
-        memcpy(&clients[clients_len++], &cls[i], sizeof *cls);
+        memcpy(&clients[clients_len++].entry, &cls[i], sizeof *cls);
     }
 }
 
@@ -353,7 +345,7 @@ static bool arp_cache_lookup_MAC(const char* addr, char MAC[MAC_STR_BUFF_LEN]) {
 
     while (fscanf(arp_fp, ARP_LINE_FMT, ln_addr, ln_MAC) != EOF) {
         if (strcmp(ln_addr, addr) == 0 && strcmp(ln_MAC, ZEROED_MAC) != 0) {
-            strncpy(MAC, ln_MAC, MAC_STR_BUFF_LEN);
+            strncpy(MAC, ln_MAC, sizeof ln_MAC);
             found_addr = true;
 
             break;
