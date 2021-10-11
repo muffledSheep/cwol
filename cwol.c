@@ -36,11 +36,11 @@
 #define ZEROED_MAC     "00:00:00:00:00:00"
 
 enum {
-    MAGIC_BYTE   = 0xFF,
-    MAGIC_LEN    = 6,
-    MAC_REPS     = 16,
+    MAGIC_BYTE  = 0xFF,
+    MAGIC_LEN   = 6,
+    MAC_REPS    = 16,
     PAYLOAD_LEN = MAGIC_LEN + MAC_REPS * MAC_OCTET_COUNT,
-    WOL_PORT     = 7
+    WOL_PORT    = 7
 };
 
 static bool online(const char* addr);
@@ -68,20 +68,22 @@ const char* error_print_prog_name = "wol";
 static char doc[] = "Wake Machines on LAN";
 static char args_doc[] = "[ADDRESS [MAC]]...";
 static struct argp_option opts[] = {
-    {"clear-cache", 'c', 0,         0, "Clear cache",                        0},
-    {"previous",    'p', 0,         0, "Wake most recently woken client",    0},
-    {"wait",        'w', "SECONDS", 0, "Seconds to wait for a client response",
-                                                                             0},
-    {"interval",    'i', "SECONDS", 0, "Seconds between client response polls",
-                                                                             0},
-    {"threads",     't', "THREADS", 0, "Number of threads to utilise",       0},
-    {"quiet",       'q', 0,         0, "Do not print to standard out",       0},
+    {"clear-cache", 'c', 0,          0, "Clear cache",                       0},
+    {"previous",    'p', 0,          0, "Wake most recently woken client",   0},
+    {"wait",        'w', "SECONDS",  0,
+        "Seconds to wait for a client response",                             0},
+    {"interval",    'i', "SECONDS",  0,
+        "Seconds between client response polls",                             0},
+    {"attempts",    'n', "ATTEMPTS", 0, "Attempts made to wake a client",    0},
+    {"threads",     't', "THREADS",  0, "Number of threads to utilise",      0},
+    {"quiet",       'q', 0,          0, "Do not print to standard out",      0},
     {0}
 };
 
 static unsigned rsp_timout_secs = 80;
 static unsigned rsp_poll_interval_secs = 1;
-static unsigned num_threads = -1;
+static unsigned thread_count = -1;
+static unsigned attempt_limit = 1;
 static bool wake_prev = false;
 static bool clear_cache = false;
 static size_t clients_len = 0;
@@ -95,7 +97,7 @@ static struct {
 int main(int argc, char** argv) {
     cache_init();
 
-    num_threads = get_nprocs();
+    thread_count = get_nprocs();
 
     struct argp argp = {opts, parse_opt, args_doc, doc, 0, 0, 0};
     argp_parse(&argp, argc, argv, 0, 0, NULL);
@@ -134,15 +136,15 @@ static void set_last_woken(void) {
 }
 
 static void wake_clients(void) {
-    pthread_t threads[num_threads];
+    pthread_t threads[thread_count];
 
     PTHREAD_CHECK(pthread_mutex_init(&clients_mutex, NULL));
 
-    for (unsigned i = 0; i < num_threads; i++) {
+    for (unsigned i = 0; i < thread_count; i++) {
         PTHREAD_CHECK(pthread_create(&threads[i], NULL, wake_worker, NULL));
     }
 
-    for (unsigned i = 0; i < num_threads; i++) {
+    for (unsigned i = 0; i < thread_count; i++) {
         PTHREAD_CHECK(pthread_join(threads[i], NULL));
     }
 
@@ -200,8 +202,14 @@ static error_t parse_opt(int key, char* arg, struct argp_state* state) {
             }
 
             break;
+        case 'n':
+            if (sscanf(arg, "%u", &attempt_limit) != 1) {
+                argp_usage(state);
+            }
+
+            break;
         case 't':
-            if (sscanf(arg, "%u", &num_threads) != 1) {
+            if (sscanf(arg, "%u", &thread_count) != 1) {
                 argp_usage(state);
             }
 
@@ -281,8 +289,12 @@ static bool wake(const ClientEntry* client) {
     time_t tick;
     time(&tick);
 
-    send_payload((char*)client->MAC);
-    bool got_rsp = await_response(client->addr);
+    bool got_rsp = false;
+
+    for (unsigned n = 0; !got_rsp && n < attempt_limit; n++) {
+        send_payload((char*)client->MAC);
+        got_rsp = await_response(client->addr);
+    }
 
     time_t tock;
     time(&tock);
@@ -322,7 +334,7 @@ static bool await_response(const char* addr) {
 
 static bool lookup_MAC(const char* addr, char MAC[MAC_STR_BUFF_LEN]) {
     size_t cmd_len = snprintf(NULL, 0, PING_CMD, addr) + 1;
-    char ping_cmd[cmd_len + 1]; // QWFX is this the right len?
+    char ping_cmd[cmd_len];
     snprintf(ping_cmd, cmd_len, PING_CMD, addr);
 
     system(ping_cmd); // Try populate ARP cache
@@ -389,8 +401,7 @@ static void send_payload(char MAC[MAC_STR_LEN]) {
     setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &yes, sizeof yes);
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof addr);
+    struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(WOL_PORT);
     addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
@@ -413,8 +424,7 @@ static bool online(const char* addr) {
     int yes = 1;
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
 
-    struct sockaddr_in sock_addr;
-    memset(&sock_addr, 0, sizeof sock_addr);
+    struct sockaddr_in sock_addr = {0};
 
     sock_addr.sin_family = AF_INET;
     sock_addr.sin_addr.s_addr = inet_addr(addr);
@@ -422,11 +432,10 @@ static bool online(const char* addr) {
     enum { PING_PORT = 22 };
     sock_addr.sin_port = htons(PING_PORT);
 
-    if (connect(sock, (struct sockaddr*)&sock_addr, sizeof sock_addr)) {
-        return false;
-    }
+    bool connected = connect(
+        sock, (struct sockaddr*)&sock_addr, sizeof sock_addr) == 0;
 
     close(sock);
 
-    return true;
+    return connected;
 }
